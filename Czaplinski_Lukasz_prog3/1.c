@@ -36,9 +36,13 @@ int main(void)
 #endif // RTL
 #endif //LTL
 
+#if defined ( LTL ) || ( RTL )
+
   void (*errPtr)(const char*, int);
   void (*delPtr)(int);
   void (*NOPtr)();
+
+#endif //defined LTL || RTL
 
 #ifdef RTL
 #ifdef LTL
@@ -66,6 +70,8 @@ int main(void)
 
 #endif //LTL
 
+#if defined ( LTL ) || ( RTL )
+
   (*errPtr)("TEST: Info error", 1); 
   (*delPtr)(100);
   (*errPtr)("TEST: Info error2", 1); 
@@ -73,4 +79,6 @@ int main(void)
   (*NOPtr)();
   (*errPtr)("TEST: Fatal error", 0); 
   return 0;
+
+#endif //defined LTL || RTL
 }

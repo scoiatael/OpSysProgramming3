@@ -18,7 +18,7 @@
 
 #define DIFF(X,Y) { struct timeval t1,t2; gettimeofday(&t1,NULL); X; gettimeofday(&t2,NULL); Y=timediff(t1,t2);}
 
-#ifndef NOFUNC
+#ifndef NO_COM_DEF
 
 void fatal(const char* msg) 
 {

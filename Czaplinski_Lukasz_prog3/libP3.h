@@ -1,6 +1,6 @@
 #ifndef LIBP3_H
 
-#define NOFUNC
+#define NO_COM_DEF
 #include "common.h"
 void NOP();
 

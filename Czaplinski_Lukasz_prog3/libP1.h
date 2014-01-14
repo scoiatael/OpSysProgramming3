@@ -1,6 +1,6 @@
 #ifndef LIBP1_H
 
-#define NOFUNC
+#define NO_COM_DEF
 #include "common.h"
 void error(const char* message, int infoLevel);
 
