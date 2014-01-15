@@ -21,17 +21,17 @@
 
 #ifndef NO_COM_DEF
 
-void fatal(const char* msg) 
-{
-  fprintf(stderr, msg);
-  fprintf(stderr, "\n");
-  exit(EXIT_FAILURE);
-}
-
 void info(const char* msg)
 {
   fprintf(stderr, msg);
   fprintf(stderr, "\n");
+}
+
+void fatal(const char* msg) 
+{
+  info(msg);
+  perror(": ");
+  exit(EXIT_FAILURE);
 }
 #endif //NOFUNC
 

@@ -18,7 +18,7 @@ int main(int argc, const char *argv[])
           printf("amount: ");
           scanf("%lld", &num);
           char* mem;
-          if(NULL == (mem = malloc( num)) ) {
+          if(NULL == (mem = my_malloc( num)) ) {
             printf("malloc Error\n");
           } else {
             memset(mem, (unsigned char)try, num);
@@ -28,9 +28,10 @@ int main(int argc, const char *argv[])
         case 'f':
           printf("pointer for free: ");
           scanf("%llx", &num);
-          free((void*)num);
+          my_free((void*)num);
           break;
         case 'd':
+          _pcon_debug();
           break;
         default:
           printf("only [a] or [f] please\n");
