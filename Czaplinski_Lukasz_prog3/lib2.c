@@ -103,6 +103,16 @@ void node_decrease_size(node_t* node, size_t size)
 
 }
 
+node_t* node_move(node_t* node, size_t size)
+{
+  char* src = (char*)node;
+  char* dest = src + size;
+  for(int i=sizeof(node_t)-1;i>=0; i = i-1) {
+    dest[i] = src[i];
+  }
+  return (node_t*)dest;
+}
+
 #define PAGE_FREE_SIZE ( PAGE_SIZE - sizeof(page_t))
 #define NODE_MAX_NUMBER ( PAGE_SIZE / PAGE_GRAIN / 2)
 
@@ -115,12 +125,13 @@ typedef struct page_desc {
 #define PAGE_DATA(page) ((node_t*)&page[1])
 
 size_t PAGE_OCCUPIED_INDEX(page_t* page, void* ptr) {
-  char* offset =  (char*)PAGE_FREE_NODES(page);
+  char* offset =  (char*)PAGE_DATA(page);
 
   int offi = (char*)ptr - offset ;
   size_t ind = (size_t)offi - sizeof(node_t);
 
-  return ind / PAGE_GRAIN;
+  ind = ind / PAGE_GRAIN / 2  ;
+  return ind;
 }
 
 void page_debug(page_t* page)
@@ -157,13 +168,22 @@ void page_node_create(page_t* page, node_t* node, size_t size, node_t* prev, nod
   char* node_end = (char*)node + size;
   assert(node_end <= page_end); // allocating on this page
   assert((next == NULL || (char*)node + size < (char*)next) && (prev == NULL || (char*)prev + prev->size < (char*)node)); //node is valid location
+
   node_init(node, size, prev, next);
   page->occupied_nodes[PAGE_OCCUPIED_INDEX(page, NODE_DATA(node))] = 0;
 }
 
-void page_node_destroy(page_t* page __attribute__((unused)), node_t* node)
+void page_update_free_node(page_t* page, node_t* node)
+{
+  if(node->prev == NULL) {
+    page->free_node = node;
+  }
+}
+
+void page_node_destroy(page_t* page, node_t* node)
 {
   node_destroy(node);
+  page_update_free_node(page, node->next);
 }
 
 void* page_find_space(page_t* page, size_t size)
@@ -174,6 +194,8 @@ void* page_find_space(page_t* page, size_t size)
     return NULL;
   }
   node_decrease_size(free_node, size);
+  free_node = node_move(free_node, size);
+  page_update_free_node(page, free_node);
   if(free_node -> size <= 1) {
     page_node_destroy(page, free_node);
   }
@@ -196,11 +218,12 @@ page_t* page_free(page_t* page, void* ptr)
   }
   node_t* prev_free_node = node_find_owner(PAGE_FREE_NODES(page), ptr);
   node_t* next_free_node;
-  node_t* this_node, prev_node;
+  node_t* this_node, *prev_node;
   if(prev_free_node == NULL) {
     next_free_node = PAGE_FREE_NODES(page);
     this_node = PAGE_DATA(page); 
     prev_node = this_node;
+    page->free_node = this_node;
   } else {
     this_node = NODE_OWNER(ptr);
     next_free_node = prev_free_node->next;
