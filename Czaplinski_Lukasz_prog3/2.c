@@ -13,6 +13,7 @@ void sigint_handler(int sig)
 
 void test(FILE* f)
 {
+  assert(f != NULL);
   void* ALLOCATED[MAX_ALLOC];
   size_t last_alloc = 0;
   unsigned long long num;
@@ -79,7 +80,14 @@ int main(int argc, const char *argv[])
     info("interactive mode");
     test(stdin);
   } else {
-    FILE* f = fopen("2Test.txt", "r");
+    FILE* f;
+    if(argc < 3 || strcmp(argv[1], "-f") != 0) {
+      f = fopen("2Test.txt", "r");
+    } else {
+      info("Using file:");
+      info(argv[2]);
+      f = fopen(argv[2], "r");
+    }
     test(f);
   }
   return 0;

@@ -7,11 +7,12 @@
 
 typedef struct node_desc {
   size_t size;
-  void* mem;
   struct node_desc* prev;
   struct node_desc* next;
-  size_t index;
 } node_t;
+
+#define NODE_DATA(node) ((void*)&node[1])
+#define NODE_OWNER(ptr) ((node_t*)((char*)ptr - sizeof(node_t)))
 
 #define LX(X) ((long unsigned int)(X))
 void node_debug(node_t* node)
@@ -21,42 +22,48 @@ void node_debug(node_t* node)
   info(buf);
   sprintf(buf, " size : %lu", LX(node->size));
   info(buf);
-  sprintf(buf, " mem  : %lx", LX(node->mem));
-  info(buf);
   sprintf(buf, " prev : %lx", LX(node->prev));
   info(buf);
   sprintf(buf, " next : %lx", LX(node->next));
   info(buf);
-  sprintf(buf, " index: %lu", LX(node->index));
-  info(buf);
 
 }
 
-void node_init(node_t* node, size_t size, void* mem, node_t* prev, node_t* next, size_t index)
+void node_init(node_t* node, size_t size, node_t* prev, node_t* next)
 {
   node->size = size;
-  node->mem = mem;
   node->prev = prev;
   node->next = next;
-  node->index = index;
+  if(node->prev != NULL) {
+    node->prev->next = node;
+  }
+  if(node->next != NULL) {
+    node->next->prev = node;
+  }
+}
+
+void node_destroy(node_t* node)
+{
+  if(node->prev != NULL) {
+    node->prev->next = node->next;
+  }
+  if(node->next != NULL) {
+    node->next->prev = node->prev;
+  }
 }
 
 char node_owns(node_t* node, char* mem)
 {
-  return ((char*)node->mem + node->size) > ((char*)node->next->mem) && mem >= (char*)node->mem;
+  return ((char*)node + node->size) > ((char*)node->next) && mem >= (char*)node;
 }
 
 node_t* node_merge_forward(node_t* node)
 {
   if(node->next == NULL)
     return NULL;
-  if(node_owns(node, (char*)node->next->mem - 1)) {
-    node->next->prev = node->prev;
-    if (node->prev != NULL) {
-      node->prev->next = node->next;
-    }
-    node->next->mem = node->mem;
-    node->next->size = node->next->size + node->size;
+  if(node_owns(node, (char*)node->next - 1)) {
+    node->size = node->next->size + node->size;
+
     return node;
   }
   return NULL;
@@ -65,7 +72,7 @@ node_t* node_merge_forward(node_t* node)
 node_t* node_find_fitting(node_t* node, size_t size)
 {
   for(;node != NULL; node = node->next) {
-    if(node->size >= size) {
+    if(node->size > size) {
       return node;
     }
   }
@@ -75,6 +82,10 @@ node_t* node_find_fitting(node_t* node, size_t size)
 node_t* node_find_owner(node_t* node, void* ptr)
 {
   // assert( owner is on this list );
+  if(ptr < (void*)node)
+  {
+    return NULL;
+  }
   char* sptr = (char*) ptr;
   for(; node->next != NULL; node = node->next) {
     if(node_owns(node, sptr)) {
@@ -86,32 +97,36 @@ node_t* node_find_owner(node_t* node, void* ptr)
 
 void node_decrease_size(node_t* node, size_t size)
 {
-  assert(node->size >= size);
+  assert(node->size > size);
 
-  node->mem = node->mem + size;
   node->size = node->size - size;
 
-  // can't do anything about nodes with size 0
 }
 
+#define PAGE_FREE_SIZE ( PAGE_SIZE - sizeof(page_t))
 #define NODE_MAX_NUMBER ( PAGE_SIZE / PAGE_GRAIN / 2)
 
 typedef struct page_desc {
-  size_t free_nodes_size;
-  node_t free_nodes[NODE_MAX_NUMBER];
   size_t occupied_nodes[NODE_MAX_NUMBER];
+  node_t* free_node;
 } page_t;
 
-#define PAGE_OCCUPIED_INDEX(page_ptr, ptr) (((char*)ptr - (char*)(page_ptr - 1)) / PAGE_GRAIN)
-#define PAGE_FREE_SIZE ( PAGE_SIZE - sizeof(page_t))
-#define PAGE_DATA(P) ((void*) &(P[1]) )
+#define PAGE_FREE_NODES(page) (page->free_node)
+#define PAGE_DATA(page) ((node_t*)&page[1])
 
-void page_node_create(page_t* page, size_t size, void* mem, node_t* prev, node_t* next);
+size_t PAGE_OCCUPIED_INDEX(page_t* page, void* ptr) {
+  char* offset =  (char*)PAGE_FREE_NODES(page);
+
+  int offi = (char*)ptr - offset ;
+  size_t ind = (size_t)offi - sizeof(node_t);
+
+  return ind / PAGE_GRAIN;
+}
 
 void page_debug(page_t* page)
 {
-  for (size_t i = 0; i < page->free_nodes_size; i++) {
-    node_debug(&page->free_nodes[i]);
+  for (node_t* i = PAGE_FREE_NODES(page); i != NULL; i = i->next) {
+    node_debug(i);
   }
   char buf[32];
   info("---");
@@ -125,8 +140,8 @@ void page_debug(page_t* page)
 
 void page_init(page_t* page)
 {
-  page->free_nodes_size = 0;
-  page_node_create(page, PAGE_FREE_SIZE, PAGE_DATA(page), NULL, NULL);
+  page->free_node = PAGE_DATA(page);
+  node_init(PAGE_FREE_NODES(page), PAGE_FREE_SIZE, NULL, NULL);
 }
 
 size_t page_get_size(page_t* page, void* ptr)
@@ -134,42 +149,36 @@ size_t page_get_size(page_t* page, void* ptr)
   return page->occupied_nodes[PAGE_OCCUPIED_INDEX(page, ptr)];
 }
 
-void page_node_create(page_t* page, size_t size, void* mem, node_t* prev, node_t* next)
+void page_node_create(page_t* page, node_t* node, size_t size, node_t* prev, node_t* next)
 {
   info("Creating new node");
-  page->free_nodes_size++;
-  assert(page->free_nodes_size < NODE_MAX_NUMBER);
-  node_init(&page->free_nodes[page->free_nodes_size-1], size, mem, prev, next, page->free_nodes_size-1);
-  page->occupied_nodes[PAGE_OCCUPIED_INDEX(page, mem)] = 0;
+  assert(node >= PAGE_FREE_NODES(page));
+  char* page_end = (char*)page + PAGE_SIZE;
+  char* node_end = (char*)node + size;
+  assert(node_end <= page_end); // allocating on this page
+  assert((next == NULL || (char*)node + size < (char*)next) && (prev == NULL || (char*)prev + prev->size < (char*)node)); //node is valid location
+  node_init(node, size, prev, next);
+  page->occupied_nodes[PAGE_OCCUPIED_INDEX(page, NODE_DATA(node))] = 0;
 }
 
-void page_node_destroy(page_t* page, node_t* node)
+void page_node_destroy(page_t* page __attribute__((unused)), node_t* node)
 {
-  page->free_nodes_size = page->free_nodes_size - 1;
-  page->free_nodes[node->index] = page->free_nodes[page->free_nodes_size];
-  page->free_nodes[node->index].index = node->index;
-  if(page->free_nodes[node->index].prev != NULL) {
-    page->free_nodes[node->index].prev->next = &page->free_nodes[node->index];
-  }
-  if(page->free_nodes[node->index].next != NULL) {
-    page->free_nodes[node->index].next->prev = &page->free_nodes[node->index];
-  }
+  node_destroy(node);
 }
 
 void* page_find_space(page_t* page, size_t size)
 {
-  node_t* free_node = node_find_fitting(&page->free_nodes[0], size);
+  node_t* free_node = node_find_fitting(PAGE_FREE_NODES(page), size);
   if(free_node == NULL) {
     info("No fitting node found");
     return NULL;
   }
-  void* mem = free_node->mem;
   node_decrease_size(free_node, size);
-  if(free_node -> size == 0) {
+  if(free_node -> size <= 1) {
     page_node_destroy(page, free_node);
   }
-  page->occupied_nodes[PAGE_OCCUPIED_INDEX(page, mem)] = size;
-  return mem;
+  page->occupied_nodes[PAGE_OCCUPIED_INDEX(page, NODE_DATA(free_node))] = size;
+  return NODE_DATA(free_node);
 }
 
 void page_node_merge_forward(page_t* page, node_t* node)
@@ -185,11 +194,21 @@ page_t* page_free(page_t* page, void* ptr)
   if(size == 0) {
     return NULL;
   }
-  page->occupied_nodes[PAGE_OCCUPIED_INDEX(page, ptr)] = -1;
-  node_t* prev_free_node = node_find_owner(&page->free_nodes[0], ptr);
-  page_node_create(page, size, ptr, prev_free_node, prev_free_node->next);
-  page_node_merge_forward(page, prev_free_node);
-  if(&page->free_nodes[0].next == NULL) {
+  node_t* prev_free_node = node_find_owner(PAGE_FREE_NODES(page), ptr);
+  node_t* next_free_node;
+  node_t* this_node, prev_node;
+  if(prev_free_node == NULL) {
+    next_free_node = PAGE_FREE_NODES(page);
+    this_node = PAGE_DATA(page); 
+    prev_node = this_node;
+  } else {
+    this_node = NODE_OWNER(ptr);
+    next_free_node = prev_free_node->next;
+    prev_node = prev_free_node;
+  }
+  page_node_create(page, this_node, size, prev_free_node, next_free_node);
+  page_node_merge_forward(page, prev_node);
+  if(PAGE_FREE_NODES(page)->next == NULL) {
     return page;
   }
   return NULL;
