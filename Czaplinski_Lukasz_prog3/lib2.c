@@ -85,7 +85,7 @@ node_t* node_find_owner(node_t* node, void* ptr)
 
 void node_decrease_size(node_t* node, size_t size)
 {
-  assert(node->size > size);
+  assert(node->size >= size);
 
   node->mem = node->mem + size;
   node->size = node->size - size;
