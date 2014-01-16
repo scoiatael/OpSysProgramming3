@@ -2,7 +2,7 @@
 
 #define MEMORY_SIZE  ( 8 * 1 << (10 * 2) ) // 1<<(10*n) = 2^10^n = 1024^n hence 8Gb of virtual mem
 #define PAGE_SIZE  4096
-#define PAGE_GRAIN 32
+#define PAGE_GRAIN (2*sizeof(node_t))//32
 #define PAGE_MAX_NUMBER ( MEMORY_SIZE / PAGE_SIZE )
 
 typedef struct node_desc {
@@ -74,13 +74,14 @@ node_t* node_find_fitting(node_t* node, size_t size)
 
 node_t* node_find_owner(node_t* node, void* ptr)
 {
+  // assert( owner is on this list );
   char* sptr = (char*) ptr;
-  for(; node != NULL; node = node->next) {
+  for(; node->next != NULL; node = node->next) {
     if(node_owns(node, sptr)) {
       return node;
     }
   }
-  return NULL;
+  return node;
 }
 
 void node_decrease_size(node_t* node, size_t size)
@@ -173,7 +174,7 @@ void* page_find_space(page_t* page, size_t size)
 
 void page_node_merge_forward(page_t* page, node_t* node)
 {
-  for(int i=0; (node = node_merge_forward(node)) != NULL && i < NODE_MAX_NUMBER; i++ ) {
+  for(unsigned int i=0; (node = node_merge_forward(node)) != NULL && i < NODE_MAX_NUMBER; i++ ) {
     page_node_destroy(page, node);
   }
 }

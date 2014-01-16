@@ -3,21 +3,32 @@
 
 #define MAX_ALLOC 100
 
+void sigint_handler(int sig)
+{
+  char buf[256];
+  sprintf(buf, "Caught %d", sig);
+  if(sig == SIGINT)
+    exit(EXIT_SUCCESS);
+}
+
 void test(FILE* f)
 {
   void* ALLOCATED[MAX_ALLOC];
   size_t last_alloc = 0;
   unsigned long long num;
   for(int try=0;;try++) {
-    printf("[a]lloc, [f]ree or [d]ebug?\n");
+    putc('#', stdout);
+    fflush(stdout);
     char ch = ' ';
     while(ch == ' ' || ch == '\n') {
-      scanf("%c", &ch);
+      if(fscanf(f,"%c", &ch) == EOF) {
+        exit(EXIT_SUCCESS);
+      }
     }
     switch(ch) {
       case 'a':
-        printf("amount: ");
-        scanf("%lld", &num);
+//        printf("amount: ");
+        fscanf(f,"%lld", &num);
         char* mem;
         if(NULL == (mem = my_malloc( num)) ) {
           printf("malloc Error\n");
@@ -33,7 +44,7 @@ void test(FILE* f)
         }
         break;
       case 'f':
-        printf("index for free: ");
+//        printf("index for free: ");
         fscanf(f, "%llu", &num);
         if(num > last_alloc) {
           fprintf(stderr, "bad index\n");
@@ -45,12 +56,15 @@ void test(FILE* f)
         break;
       case 'd':
         for(unsigned int i = 0; i<last_alloc; i++) {
-          printf("%d : %llx\n", i, (unsigned long long)ALLOCATED[num]);
+          printf("%d : %p\n", i, ALLOCATED[i]);
         }
         _pcon_debug();
         break;
+      case 'q':
+        exit(EXIT_SUCCESS);
+      case 'h':
       default:
-        printf("only [a] or [f] please\n");
+        printf("[q]uit, [a]lloc <amount>, [f]ree <index>, [d]ebug or [h]elp?\n");
     }
   }
 
@@ -58,8 +72,11 @@ void test(FILE* f)
 
 int main(int argc, const char *argv[])
 {
+  if(signal(SIGINT, &sigint_handler) == SIG_ERR)
+    info("signal(SIGINT) failed");
   printf("PAGESIZE: %ld\n", sysconf(_SC_PAGESIZE));
-  if(argc == 1 || strcmp(argv[1],"-i")==0) {
+  if(argc != 1 && strcmp(argv[1],"-i")==0) {
+    info("interactive mode");
     test(stdin);
   } else {
     FILE* f = fopen("2Test.txt", "r");
