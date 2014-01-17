@@ -51,8 +51,8 @@ void test(FILE* f)
           fprintf(stderr, "bad index\n");
         } else {
           my_free(ALLOCATED[num]);
-          ALLOCATED[num] = ALLOCATED[last_alloc];
           last_alloc = last_alloc - 1;
+          ALLOCATED[num] = ALLOCATED[last_alloc];
         }
         break;
       case 'd':

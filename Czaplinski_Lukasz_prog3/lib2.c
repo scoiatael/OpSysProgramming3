@@ -54,14 +54,23 @@ void node_destroy(node_t* node)
 
 char node_owns(node_t* node, char* mem)
 {
-  return ((char*)node + node->size) > ((char*)node->next) && mem >= (char*)node;
+  char p1 = ((char*)node->next) > ((char*)mem);
+  char p2 =  mem >= (char*)node;
+  return p1 && p2;
+}
+
+char node_touches(node_t* node, node_t* neighbour)
+{
+  assert(node < neighbour);
+  char p2 = (char*)NODE_DATA(node) + node->size >= (char*)neighbour;
+  return p2;
 }
 
 node_t* node_merge_forward(node_t* node)
 {
   if(node->next == NULL)
     return NULL;
-  if(node_owns(node, (char*)node->next - 1)) {
+  if(node_touches(node, node->next)) {
     node->size = node->next->size + node->size;
 
     return node;
@@ -114,7 +123,7 @@ node_t* node_move(node_t* node, size_t size)
 }
 
 #define PAGE_FREE_SIZE ( PAGE_SIZE - sizeof(page_t))
-#define NODE_MAX_NUMBER ( PAGE_SIZE / PAGE_GRAIN / 2)
+#define NODE_MAX_NUMBER ( PAGE_SIZE / PAGE_GRAIN)
 
 typedef struct page_desc {
   size_t occupied_nodes[NODE_MAX_NUMBER];
@@ -128,9 +137,9 @@ size_t PAGE_OCCUPIED_INDEX(page_t* page, void* ptr) {
   char* offset =  (char*)PAGE_DATA(page);
 
   int offi = (char*)ptr - offset ;
-  size_t ind = (size_t)offi - sizeof(node_t);
+  size_t ind = (size_t)offi;
 
-  ind = ind / PAGE_GRAIN / 2  ;
+  ind = ind / PAGE_GRAIN ;
   return ind;
 }
 
@@ -167,15 +176,16 @@ void page_node_create(page_t* page, node_t* node, size_t size, node_t* prev, nod
   char* page_end = (char*)page + PAGE_SIZE;
   char* node_end = (char*)node + size;
   assert(node_end <= page_end); // allocating on this page
-  assert((next == NULL || (char*)node + size < (char*)next) && (prev == NULL || (char*)prev + prev->size < (char*)node)); //node is valid location
+  assert((next == NULL || node_end <= (char*)next));
+  assert((prev == NULL || (char*)prev + prev->size <= (char*)node)); //node is valid location
 
   node_init(node, size, prev, next);
-  page->occupied_nodes[PAGE_OCCUPIED_INDEX(page, NODE_DATA(node))] = 0;
+  page->occupied_nodes[PAGE_OCCUPIED_INDEX(page, (void*)node)] = 0;
 }
 
 void page_update_free_node(page_t* page, node_t* node)
 {
-  if(node->prev == NULL) {
+  if(node != NULL && node->prev == NULL) {
     page->free_node = node;
   }
 }
@@ -194,19 +204,20 @@ void* page_find_space(page_t* page, size_t size)
     return NULL;
   }
   node_decrease_size(free_node, size);
+  void* mem = (void*)free_node;
   free_node = node_move(free_node, size);
   page_update_free_node(page, free_node);
   if(free_node -> size <= 1) {
     page_node_destroy(page, free_node);
   }
-  page->occupied_nodes[PAGE_OCCUPIED_INDEX(page, NODE_DATA(free_node))] = size;
-  return NODE_DATA(free_node);
+  page->occupied_nodes[PAGE_OCCUPIED_INDEX(page, mem)] = size;
+  return mem;
 }
 
 void page_node_merge_forward(page_t* page, node_t* node)
 {
   for(unsigned int i=0; (node = node_merge_forward(node)) != NULL && i < NODE_MAX_NUMBER; i++ ) {
-    page_node_destroy(page, node);
+    page_node_destroy(page, node->next);
   }
 }
 
@@ -219,13 +230,12 @@ page_t* page_free(page_t* page, void* ptr)
   node_t* prev_free_node = node_find_owner(PAGE_FREE_NODES(page), ptr);
   node_t* next_free_node;
   node_t* this_node, *prev_node;
+  this_node = (node_t*) ptr; 
   if(prev_free_node == NULL) {
     next_free_node = PAGE_FREE_NODES(page);
-    this_node = PAGE_DATA(page); 
     prev_node = this_node;
     page->free_node = this_node;
   } else {
-    this_node = NODE_OWNER(ptr);
     next_free_node = prev_free_node->next;
     prev_node = prev_free_node;
   }
@@ -337,6 +347,7 @@ void pcon_dealloc_page(pcontrol_t* pcon, page_t* page)
 
 void* pcon_malloc(pcontrol_t* pcon, size_t size)
 {
+  size = (size < PAGE_GRAIN) ? PAGE_GRAIN : size;
   void* mem = pcon_find_space(pcon, size);
   if(mem == NULL) {
     info("Allocating new page");
