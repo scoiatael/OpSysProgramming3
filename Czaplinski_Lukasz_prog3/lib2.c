@@ -2,7 +2,7 @@
 
 #define MEMORY_SIZE  ( 8 * 1 << (10 * 2) ) // 1<<(10*n) = 2^10^n = 1024^n hence 8Gb of virtual mem
 #define PAGE_SIZE  4096
-#define PAGE_GRAIN (2*sizeof(node_t))//32
+#define PAGE_GRAIN (2*sizeof(size_t)) 
 #define PAGE_MAX_NUMBER ( MEMORY_SIZE / PAGE_SIZE )
 
 typedef struct node_desc {
@@ -126,35 +126,16 @@ node_t* node_move(node_t* node, size_t size)
 #define NODE_MAX_NUMBER ( PAGE_SIZE / PAGE_GRAIN)
 
 typedef struct page_desc {
-  size_t occupied_nodes[NODE_MAX_NUMBER];
   node_t* free_node;
 } page_t;
 
 #define PAGE_FREE_NODES(page) (page->free_node)
 #define PAGE_DATA(page) ((node_t*)&page[1])
 
-size_t PAGE_OCCUPIED_INDEX(page_t* page, void* ptr) {
-  char* offset =  (char*)PAGE_DATA(page);
-
-  int offi = (char*)ptr - offset ;
-  size_t ind = (size_t)offi;
-
-  ind = ind / PAGE_GRAIN ;
-  return ind;
-}
-
 void page_debug(page_t* page)
 {
   for (node_t* i = PAGE_FREE_NODES(page); i != NULL; i = i->next) {
     node_debug(i);
-  }
-  char buf[32];
-  info("---");
-  for (size_t i = 0; i < NODE_MAX_NUMBER; i++) {
-    if(page->occupied_nodes[i] != 0) {
-      sprintf(buf, "%lu : %lu\n", i, page->occupied_nodes[i]);
-      info(buf);
-    }
   }
 }
 
@@ -164,9 +145,15 @@ void page_init(page_t* page)
   node_init(PAGE_FREE_NODES(page), PAGE_FREE_SIZE, NULL, NULL);
 }
 
-size_t page_get_size(page_t* page, void* ptr)
+void* page_set_size(page_t* page __attribute__((unused)), void* ptr, size_t size)
 {
-  return page->occupied_nodes[PAGE_OCCUPIED_INDEX(page, ptr)];
+  *(size_t*)ptr = size;
+  return (void*)((size_t*)ptr + 1);
+}
+
+size_t page_get_size(page_t* page __attribute__((unused)), void* ptr)
+{
+  return *(size_t*)ptr;
 }
 
 void page_node_create(page_t* page, node_t* node, size_t size, node_t* prev, node_t* next)
@@ -180,7 +167,6 @@ void page_node_create(page_t* page, node_t* node, size_t size, node_t* prev, nod
   assert((prev == NULL || (char*)prev + prev->size <= (char*)node)); //node is valid location
 
   node_init(node, size, prev, next);
-  page->occupied_nodes[PAGE_OCCUPIED_INDEX(page, (void*)node)] = 0;
 }
 
 void page_update_free_node(page_t* page, node_t* node)
@@ -196,6 +182,7 @@ void page_node_destroy(page_t* page, node_t* node)
   page_update_free_node(page, node->next);
 }
 
+#define ALLOC_SIZE(S) (S + sizeof(size_t))
 void* page_find_space(page_t* page, size_t size)
 {
   node_t* free_node = node_find_fitting(PAGE_FREE_NODES(page), size);
@@ -203,15 +190,14 @@ void* page_find_space(page_t* page, size_t size)
     info("No fitting node found");
     return NULL;
   }
-  node_decrease_size(free_node, size);
+  node_decrease_size(free_node, ALLOC_SIZE(size));
   void* mem = (void*)free_node;
-  free_node = node_move(free_node, size);
+  free_node = node_move(free_node, ALLOC_SIZE(size));
   page_update_free_node(page, free_node);
   if(free_node -> size <= 1) {
     page_node_destroy(page, free_node);
   }
-  page->occupied_nodes[PAGE_OCCUPIED_INDEX(page, mem)] = size;
-  return mem;
+  return page_set_size(page, mem, size);
 }
 
 void page_node_merge_forward(page_t* page, node_t* node)
@@ -223,6 +209,7 @@ void page_node_merge_forward(page_t* page, node_t* node)
 
 page_t* page_free(page_t* page, void* ptr)
 {
+  ptr = (void*)((size_t*)ptr - 1);
   size_t size = page_get_size(page, ptr);
   if(size == 0) {
     return NULL;
