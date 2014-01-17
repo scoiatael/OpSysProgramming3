@@ -1,9 +1,6 @@
 #include "common.h"
 
-#define MEMORY_SIZE  ( 8 * 1 << (10 * 3) ) // 1<<(10*n) = 2^10^n = 1024^n hence 8Gb of virtual mem
-#define PAGE_SIZE  (4096 << 4)
 #define PAGE_GRAIN (2*sizeof(size_t)) 
-#define PAGE_MAX_NUMBER ( MEMORY_SIZE / PAGE_SIZE )
 
 typedef struct node_desc {
   size_t size;
@@ -122,11 +119,10 @@ node_t* node_move(node_t* node, size_t size)
   return (node_t*)dest;
 }
 
-#define PAGE_FREE_SIZE ( PAGE_SIZE - sizeof(page_t))
-#define NODE_MAX_NUMBER ( PAGE_SIZE / PAGE_GRAIN)
-
 typedef struct page_desc {
+  size_t size;
   node_t* free_node;
+  struct page_desc* next_page;
 } page_t;
 
 #define PAGE_FREE_NODES(page) (page->free_node)
@@ -139,10 +135,11 @@ void page_debug(page_t* page)
   }
 }
 
-void page_init(page_t* page)
+void page_init(page_t* page, size_t size)
 {
+  page->size = size;
   page->free_node = PAGE_DATA(page);
-  node_init(PAGE_FREE_NODES(page), PAGE_FREE_SIZE, NULL, NULL);
+  node_init(PAGE_FREE_NODES(page), size, NULL, NULL);
 }
 
 void* page_set_size(page_t* page __attribute__((unused)), void* ptr, size_t size)
@@ -160,7 +157,7 @@ void page_node_create(page_t* page, node_t* node, size_t size, node_t* prev, nod
 {
   info("Creating new node");
   assert(node >= PAGE_FREE_NODES(page));
-  char* page_end = (char*)page + PAGE_SIZE;
+  char* page_end = (char*)page + page->size;
   char* node_end = (char*)node + size;
   assert(node_end <= page_end); // allocating on this page
   assert((next == NULL || node_end <= (char*)next));
@@ -202,12 +199,13 @@ void* page_find_space(page_t* page, size_t size)
 
 void page_node_merge_forward(page_t* page, node_t* node)
 {
-  for(unsigned int i=0; (node = node_merge_forward(node)) != NULL && i < NODE_MAX_NUMBER; i++ ) {
+  for(unsigned int i=0; (node = node_merge_forward(node)) != NULL; i++ ) {
     page_node_destroy(page, node->next);
   }
 }
 
 #define PAGE_REAL_PTR(ptr) ((void*)((size_t*)ptr - 1))
+
 page_t* page_free(page_t* page, void* ptr)
 {
   ptr = PAGE_REAL_PTR(ptr);;
@@ -237,8 +235,7 @@ page_t* page_free(page_t* page, void* ptr)
 
 typedef struct pagecontrol {
   char flags;
-  size_t pages_size;
-  page_t* pages[PAGE_MAX_NUMBER];
+  page_t* pages;
 
 } pcontrol_t;
 
@@ -247,15 +244,21 @@ typedef struct pagecontrol {
 #define PCON_IS_INIT(X) ( ((X)->flags & PCON_INITFLAG) == 1 )
 #define PCON_CHECKINIT(X) { if( ! PCON_IS_INIT(X) ) { info("Initializing pcon.."); pcontrol_init(X); } }
 
-page_t* pcon_allocate_new_page(pcontrol_t* pcon);
+#define PAGE_SIZE 4096
+
+#define PAGE_NEXT(P) ((P)->next_page)
+#define PAGE_SET_NEXT(P,Ptr) { (P)->next_page = Ptr; }
+
+page_t* pcon_allocate_new_page(pcontrol_t* pcon, size_t size);
 
 void pcon_debug(pcontrol_t* pcon)
 {
-  for (size_t i = 0; i < pcon->pages_size; i++) {
+  size_t i=0;
+  for (page_t* p = pcon->pages; p!=NULL; p = PAGE_NEXT(p), i++) {
     char buf[32];
     sprintf(buf, "---\npagenr : %lu\n", i);
     info(buf);
-    page_debug(pcon->pages[i]);
+    page_debug(p);
   }
 }
 
@@ -267,8 +270,7 @@ void pcontrol_init(pcontrol_t* pcon)
     fatal("Subsequent initialization of pcontrol_t");
   }
   pcon->flags = PCON_INITFLAG;
-  pcon->pages_size = 0;
-  if(pcon_allocate_new_page(pcon) == NULL)
+  if(pcon_allocate_new_page(pcon, PAGE_SIZE) == NULL)
   {
     fatal("Cannot allocate first page");
   }
@@ -278,8 +280,8 @@ void pcontrol_init(pcontrol_t* pcon)
 void* pcon_find_space(pcontrol_t* pcon, size_t size)
 {
   void* mem = NULL;
-  for (unsigned int i = 0; i < pcon->pages_size; i++) {
-    if((mem = page_find_space(pcon->pages[i], size)) != NULL) {
+  for (page_t* p = pcon->pages; p != NULL; p = PAGE_NEXT(p)) {
+    if((mem = page_find_space(p, size)) != NULL) {
       return mem;
     }
   }
@@ -288,9 +290,9 @@ void* pcon_find_space(pcontrol_t* pcon, size_t size)
 
 page_t* pcon_get_owner(pcontrol_t* pcon, void* ptr)
 {
-  for (unsigned int i = 0; i < pcon->pages_size; i++) {
-    if( ((char*)ptr > (char*)pcon->pages[i]) && ((char*)ptr < ((char*)(pcon->pages[i]) + PAGE_SIZE))) {
-      return pcon->pages[i];
+  for (page_t* p = pcon->pages; p != NULL; p = PAGE_NEXT(p)) {
+    if( ((char*)ptr > (char*)p) && ((char*)ptr < ((char*)(p) + p->size))) {
+      return p;
     }
   }
   return NULL;
@@ -305,34 +307,39 @@ size_t pcon_get_size(pcontrol_t* pcon, void* ptr)
   return page_get_size(page, PAGE_REAL_PTR(ptr));
 }
 
-page_t* pcon_allocate_new_page(pcontrol_t* pcon)
+page_t* pcon_allocate_new_page(pcontrol_t* pcon, size_t size)
 {
-  pcon->pages_size++;
-  pcon->pages[pcon->pages_size-1] = (page_t*) mmap(NULL, PAGE_SIZE, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-  if(pcon->pages[pcon->pages_size-1] == NULL) {
+  info("Allocating new page");
+  char buf[256];
+  size_t psize = (size > PAGE_SIZE) ? 2*size : PAGE_SIZE;
+  sprintf(buf, " size: %lu", psize);
+  info(buf);
+  page_t* p = (page_t*) mmap(NULL, psize, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  if(p == NULL) {
     info("mmap failed");
-    pcon->pages_size = pcon->pages_size - 1;
     return NULL;
   }
-  page_init(pcon->pages[pcon->pages_size-1]);
-  return pcon->pages[pcon->pages_size-1];
+  PAGE_SET_NEXT(p,pcon->pages);
+  pcon->pages = p;
+  page_init(p, psize);
+  return p;
 }
 
 void pcon_dealloc_page(pcontrol_t* pcon, page_t* page)
 {
-  size_t i;
-  for (i = 0; i < pcon->pages_size; i++) {
-    if(pcon->pages[i] == page) {
-      break;
-    }
-  }
-  if(i == 0)
+  if(page == pcon->pages && PAGE_NEXT(page) == NULL)
     return; // don't deallocate last page
-  assert(i < pcon->pages_size );
-  munmap(page, PAGE_SIZE);
-  assert( pcon -> pages_size > 0);
-  pcon -> pages_size = pcon->pages_size-1;
-  pcon->pages[i] = pcon->pages[pcon->pages_size];
+  info("deallocating page");
+  page_t* next = PAGE_NEXT(page);
+//  munmap(page, page->size);
+  page_t* p;
+  for (p = pcon->pages; PAGE_NEXT(p) != NULL; p = PAGE_NEXT(p)) {
+    if(PAGE_NEXT(p) == page)
+      break;
+  }
+  if(p != NULL) {
+    PAGE_SET_NEXT(p, next);
+  }
 }
 
 void* pcon_malloc(pcontrol_t* pcon, size_t size)
@@ -340,8 +347,7 @@ void* pcon_malloc(pcontrol_t* pcon, size_t size)
   size = (size < PAGE_GRAIN) ? PAGE_GRAIN : size;
   void* mem = pcon_find_space(pcon, size);
   if(mem == NULL) {
-    info("Allocating new page");
-    page_t* page_ptr = pcon_allocate_new_page(pcon);
+    page_t* page_ptr = pcon_allocate_new_page(pcon, size);
     if(page_ptr  == NULL) {
       info("failed to allocate new page");
       return NULL;
@@ -390,14 +396,18 @@ void _pcon_debug()
 void pcon_cleanup()
 {
   info("Cleaning up..\n");
-  for (size_t i = 0; i < _pageinfo.pages_size; i++) {
-    munmap(_pageinfo.pages[i], PAGE_SIZE);
+  for (page_t* p = _pageinfo.pages, *t = p; p != NULL; p = t ) {
+    t = PAGE_NEXT(p);
+    munmap(p, p->size);
   }
 }
 
 void* malloc(size_t size)
 {
   PCON_CHECKINIT(& _pageinfo);
+  char buf[256];
+  sprintf(buf, " malloc size: %lu", size);
+  info(buf);
   return pcon_malloc(&_pageinfo, size);
 }
 
@@ -421,5 +431,8 @@ void free(void* ptr)
   if(! PCON_IS_INIT(&_pageinfo) ) {
     return;
   }
+  char buf[256];
+  sprintf(buf, " free: %p",ptr);
+  info(buf);
   pcon_free(& _pageinfo, ptr);
 }
