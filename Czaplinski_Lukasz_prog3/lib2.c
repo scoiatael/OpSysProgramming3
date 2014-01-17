@@ -325,6 +325,8 @@ void pcon_dealloc_page(pcontrol_t* pcon, page_t* page)
       break;
     }
   }
+  if(i == 0)
+    return; // don't deallocate last page
   assert(i < pcon->pages_size );
   munmap(page, PAGE_SIZE);
   assert( pcon -> pages_size > 0);
