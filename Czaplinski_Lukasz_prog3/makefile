@@ -53,3 +53,5 @@ lib2.so : lib2.c
 	$(CC) $(CFLAGS) -export-dynamic -c 2.c
 	$(LD) $(LFLAGS) -o 2Test 2.o lib2.so
 	
+LDTrick% : lib2.so
+	LD_PRELOAD=$$( pwd )/lib2.so $*

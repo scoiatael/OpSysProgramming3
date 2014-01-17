@@ -16,7 +16,8 @@ void test(FILE* f)
   assert(f != NULL);
   void* ALLOCATED[MAX_ALLOC];
   size_t last_alloc = 0;
-  unsigned long long num;
+  unsigned long long num,ptr;
+  char* mem;
   for(int try=0;;try++) {
     putc('#', stdout);
     fflush(stdout);
@@ -27,12 +28,28 @@ void test(FILE* f)
       }
     }
     switch(ch) {
+      case 'c':
+//        printf("amount: ");
+        fscanf(f,"%llu", &ptr);
+        fscanf(f,"%llu", &num);
+        if(NULL == (mem = calloc(ptr, num)) ) {
+          printf("calloc error\n");
+        } else {
+          memset(mem, (unsigned char)try, num*ptr);
+          printf(" calloc pointer: %p\n", mem);
+          if(last_alloc < MAX_ALLOC) {
+            ALLOCATED[last_alloc] = mem;
+            last_alloc++;
+          } else {
+            fprintf(stderr, "too many bits, ptr not saved\n");
+          }
+        }
+        break;
       case 'a':
 //        printf("amount: ");
         fscanf(f,"%lld", &num);
-        char* mem;
-        if(NULL == (mem = my_malloc( num)) ) {
-          printf("malloc Error\n");
+        if(NULL == (mem = malloc( num)) ) {
+          printf("malloc error\n");
         } else {
           memset(mem, (unsigned char)try, num);
           printf(" malloc pointer: %p\n", mem);
@@ -40,8 +57,20 @@ void test(FILE* f)
             ALLOCATED[last_alloc] = mem;
             last_alloc++;
           } else {
-            fprintf(stderr, "Too many bits, ptr not saved\n");
+            fprintf(stderr, "too many bits, ptr not saved\n");
           }
+        }
+        break;
+      case 'r':
+//        printf("amount: ");
+        fscanf(f,"%llu", &ptr);
+        fscanf(f,"%lld", &num);
+        if(NULL == (mem = realloc(ALLOCATED[ptr], num)) ) {
+          printf("realloc Error\n");
+        } else {
+          memset(mem, (unsigned char)try, num);
+          printf(" realloc pointer: %p\n", mem);
+          ALLOCATED[ptr] = mem;
         }
         break;
       case 'f':
@@ -50,7 +79,7 @@ void test(FILE* f)
         if(num > last_alloc) {
           fprintf(stderr, "bad index\n");
         } else {
-          my_free(ALLOCATED[num]);
+          free(ALLOCATED[num]);
           last_alloc = last_alloc - 1;
           ALLOCATED[num] = ALLOCATED[last_alloc];
         }
@@ -65,7 +94,7 @@ void test(FILE* f)
         exit(EXIT_SUCCESS);
       case 'h':
       default:
-        printf("[q]uit, [a]lloc <amount>, [f]ree <index>, [d]ebug or [h]elp?\n");
+        printf("[q]uit, [a]lloc <amount>, [f]ree <index>, [c]alloc <nmem> <size>, [r]ealloc <index> <amount>, [d]ebug or [h]elp?\n");
     }
   }
 

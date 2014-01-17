@@ -1,7 +1,7 @@
 #include "common.h"
 
-#define MEMORY_SIZE  ( 8 * 1 << (10 * 2) ) // 1<<(10*n) = 2^10^n = 1024^n hence 8Gb of virtual mem
-#define PAGE_SIZE  4096
+#define MEMORY_SIZE  ( 8 * 1 << (10 * 3) ) // 1<<(10*n) = 2^10^n = 1024^n hence 8Gb of virtual mem
+#define PAGE_SIZE  (4096 << 4)
 #define PAGE_GRAIN (2*sizeof(size_t)) 
 #define PAGE_MAX_NUMBER ( MEMORY_SIZE / PAGE_SIZE )
 
@@ -207,9 +207,10 @@ void page_node_merge_forward(page_t* page, node_t* node)
   }
 }
 
+#define PAGE_REAL_PTR(ptr) ((void*)((size_t*)ptr - 1))
 page_t* page_free(page_t* page, void* ptr)
 {
-  ptr = (void*)((size_t*)ptr - 1);
+  ptr = PAGE_REAL_PTR(ptr);;
   size_t size = page_get_size(page, ptr);
   if(size == 0) {
     return NULL;
@@ -271,7 +272,7 @@ void pcontrol_init(pcontrol_t* pcon)
   {
     fatal("Cannot allocate first page");
   }
-  atexit(&pcon_cleanup);
+ // atexit(&pcon_cleanup);
 }
 
 void* pcon_find_space(pcontrol_t* pcon, size_t size)
@@ -301,7 +302,7 @@ size_t pcon_get_size(pcontrol_t* pcon, void* ptr)
   if(page == NULL) {
     return 0;
   }
-  return page_get_size(page, ptr);
+  return page_get_size(page, PAGE_REAL_PTR(ptr));
 }
 
 page_t* pcon_allocate_new_page(pcontrol_t* pcon)
@@ -347,6 +348,8 @@ void* pcon_malloc(pcontrol_t* pcon, size_t size)
     }
     mem = page_find_space(page_ptr, size);
   }
+  if(mem == NULL)
+    info("malloc failed");
   return mem;
 }
 
@@ -392,20 +395,20 @@ void pcon_cleanup()
   }
 }
 
-void* my_malloc(size_t size)
+void* malloc(size_t size)
 {
   PCON_CHECKINIT(& _pageinfo);
   return pcon_malloc(&_pageinfo, size);
 }
 
-void* my_calloc(size_t count, size_t size)
+void* calloc(size_t count, size_t size)
 {
   PCON_CHECKINIT(& _pageinfo);
   return pcon_malloc(&_pageinfo, size*count);
 }
 
 
-void* my_realloc(void* ptr, size_t size)
+void* realloc(void* ptr, size_t size)
 {
   if(! PCON_IS_INIT(&_pageinfo) ) {
     return NULL;
@@ -413,7 +416,7 @@ void* my_realloc(void* ptr, size_t size)
   return pcon_realloc(& _pageinfo, ptr, size);
 }
 
-void my_free(void* ptr)
+void free(void* ptr)
 {
   if(! PCON_IS_INIT(&_pageinfo) ) {
     return;
