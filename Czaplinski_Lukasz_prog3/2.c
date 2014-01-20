@@ -1,4 +1,5 @@
 #include "lib2.h"
+#define DEBUG
 #include "common.h"
 
 #define MAX_ALLOC 100
