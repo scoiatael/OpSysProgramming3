@@ -22,19 +22,22 @@
 
 #ifndef NO_COM_DEF
 
-void info(const char* msg)
+void info(const char* msg __attribute__((unused)) )
 {
+#ifdef DEBUG
   fprintf(stderr, msg);
   fprintf(stderr, "\n");
+#endif //DEBUG
 }
 
-void fatal(const char* msg) 
+void fatal(const char* msg __attribute__((unused)) ) 
 {
+#ifdef DEBUG
   info(msg);
   perror(": ");
+#endif //DEBUG
   exit(EXIT_FAILURE);
 }
-#endif //NOFUNC
+#endif // NO_COM_DEF
 
-#define ERRF 
 #endif /* end of include guard: COMMON_H */
