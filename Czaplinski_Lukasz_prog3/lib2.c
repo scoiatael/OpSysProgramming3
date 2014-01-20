@@ -1,4 +1,9 @@
 #include "common.h"
+#include <malloc.h>
+
+static void my_init();
+
+void (*__MALLOC_HOOK_VOLATILE __malloc_initialize_hook)(void) = my_init;
 
 #define PAGE_GRAIN (2*sizeof(size_t)) 
 
@@ -262,7 +267,7 @@ void pcon_debug(pcontrol_t* pcon)
   }
 }
 
-void pcon_cleanup();
+ void pcon_cleanup();
 
 void pcontrol_init(pcontrol_t* pcon)
 {
@@ -386,14 +391,19 @@ void* pcon_realloc(pcontrol_t* pcon, void* ptr, size_t size)
   return mem;
 }
 
-pcontrol_t _pageinfo;
+static pcontrol_t _pageinfo;
 
-void _pcon_debug()
+ void my_init()
+{
+  PCON_CHECKINIT(&_pageinfo);
+}
+
+ void _pcon_debug()
 {
   pcon_debug(& _pageinfo);
 }
 
-void pcon_cleanup()
+ void pcon_cleanup()
 {
   info("Cleaning up..\n");
   for (page_t* p = _pageinfo.pages, *t = p; p != NULL; p = t ) {
@@ -402,7 +412,7 @@ void pcon_cleanup()
   }
 }
 
-void* malloc(size_t size)
+ void* malloc(size_t size)
 {
   PCON_CHECKINIT(& _pageinfo);
   char buf[256];
@@ -411,14 +421,14 @@ void* malloc(size_t size)
   return pcon_malloc(&_pageinfo, size);
 }
 
-void* calloc(size_t count, size_t size)
+ void* calloc(size_t count, size_t size)
 {
   PCON_CHECKINIT(& _pageinfo);
   return pcon_malloc(&_pageinfo, size*count);
 }
 
 
-void* realloc(void* ptr, size_t size)
+ void* realloc(void* ptr, size_t size)
 {
   if(! PCON_IS_INIT(&_pageinfo) ) {
     return NULL;
@@ -426,7 +436,7 @@ void* realloc(void* ptr, size_t size)
   return pcon_realloc(& _pageinfo, ptr, size);
 }
 
-void free(void* ptr)
+ void free(void* ptr)
 {
   if(! PCON_IS_INIT(&_pageinfo) ) {
     return;
