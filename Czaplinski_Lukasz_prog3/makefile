@@ -1,7 +1,7 @@
 CC=gcc
 LD=LD_RUN_PATH=$(shell pwd) gcc
 LDR=$$LD_RUN_PATH
-CFLAGS=-std=gnu99 -Wall -Wextra -Werror -g
+CFLAGS=-std=gnu99 -Wall -Wextra -g
 LFLAGS=-Wl,-export-dynamic
 EXC=3 4 5 6 7 8 1
 TRASH=*.o $(EXC) .depend 1RTL 1LTL lib1.so lib2.so 2Test

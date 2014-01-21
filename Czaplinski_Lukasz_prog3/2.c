@@ -1,8 +1,9 @@
-#include "lib2.h"
 #define DEBUG
+#include "lib2.h"
 #include "common.h"
+#include <sys/timeb.h>
 
-#define MAX_ALLOC 100
+#define MAX_ALLOC (2 << 5)
 
 void sigint_handler(int sig)
 {
@@ -42,7 +43,7 @@ void test(FILE* f)
             ALLOCATED[last_alloc] = mem;
             last_alloc++;
           } else {
-            fprintf(stderr, "too many bits, ptr not saved\n");
+            fprintf(stdout, "too many bits, ptr not saved\n");
           }
         }
         break;
@@ -58,7 +59,7 @@ void test(FILE* f)
             ALLOCATED[last_alloc] = mem;
             last_alloc++;
           } else {
-            fprintf(stderr, "too many bits, ptr not saved\n");
+            fprintf(stdout, "too many bits, ptr not saved\n");
           }
         }
         break;
@@ -77,8 +78,8 @@ void test(FILE* f)
       case 'f':
 //        printf("index for free: ");
         fscanf(f, "%llu", &num);
-        if(num > last_alloc) {
-          fprintf(stderr, "bad index\n");
+        if(num >= last_alloc) {
+          fprintf(stdout, "bad index\n");
         } else {
           free(ALLOCATED[num]);
           last_alloc = last_alloc - 1;
@@ -109,6 +110,36 @@ int main(int argc, const char *argv[])
   if(argc != 1 && strcmp(argv[1],"-i")==0) {
     info("interactive mode");
     test(stdin);
+  }
+  if(argc != 1 && strcmp(argv[1],"-r")==0) {
+    FILE* f;
+    f = fopen("2Log.txt", "w+");
+    if(f == NULL) {
+      fatal("fopen");
+    }
+    struct timeb t;
+    ftime(&t);
+    srand( t.time + t.millitm );
+    int r = rand() % (2 << 16);
+    int ind = 0;
+    for (int i = 0; i < r; i++) {
+      char op = rand() % 2;
+      switch(op) {
+        case 0:
+          fprintf(f, "a %d\n", rand() % ( 2 << 16 ));
+          ind++;
+          break;
+        case 1:
+          if(ind > 0) {
+            fprintf(f, "f %d\n", rand() % ind);
+            ind --;
+          }
+          break;
+      }
+    }
+    fflush(f);
+    rewind(f);
+    test(f);
   } else {
     FILE* f;
     if(argc < 3 || strcmp(argv[1], "-f") != 0) {

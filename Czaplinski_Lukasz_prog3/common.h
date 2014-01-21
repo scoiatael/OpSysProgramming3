@@ -22,6 +22,14 @@
 
 #ifndef NO_COM_DEF
 
+void ilog(const char* msg __attribute__((unused)) )
+{
+#ifdef DEBUG
+  fprintf(stdout, msg);
+  fprintf(stdout, "\n");
+#endif //DEBUG
+}
+
 void info(const char* msg __attribute__((unused)) )
 {
 #ifdef DEBUG
@@ -32,10 +40,8 @@ void info(const char* msg __attribute__((unused)) )
 
 void fatal(const char* msg __attribute__((unused)) ) 
 {
-#ifdef DEBUG
   info(msg);
-  perror(": ");
-#endif //DEBUG
+  perror(" ");
   exit(EXIT_FAILURE);
 }
 #endif // NO_COM_DEF

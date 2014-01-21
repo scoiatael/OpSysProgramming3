@@ -1,6 +1,7 @@
 #define DEBUG
 #include "common.h"
 #include <malloc.h>
+#include <pthread.h>
 
 static void my_init();
 
@@ -9,12 +10,12 @@ void (*__MALLOC_HOOK_VOLATILE __malloc_initialize_hook)(void) = my_init;
 extern void* __libc_malloc(size_t size);
 extern void* __libc_calloc(size_t num, size_t size);
 extern void* __libc_realloc(void* ptr, size_t size);
-extern void* __libc_free(void* ptr);
+extern void __libc_free(void* ptr);
 
 #define IF_MALLOC_ACTIVE if(malloc_hook_active == 1)
 #define ELSE_GLIBC } else {
 
-char malloc_hook_active = 1;
+static char malloc_hook_active = 1;
 
 #define INFO(X) { malloc_hook_active = 0; info(X); malloc_hook_active = 1; }
 #define FATAL(X) { malloc_hook_active = 0; fatal(X); }
@@ -47,17 +48,22 @@ void node_debug(node_t* node)
 
 }
 
-void node_init(node_t* node, size_t size, node_t* prev, node_t* next)
+void node_update_neighbours(node_t* node)
 {
-  node->size = size;
-  node->prev = prev;
-  node->next = next;
   if(node->prev != NULL) {
     node->prev->next = node;
   }
   if(node->next != NULL) {
     node->next->prev = node;
   }
+}
+
+void node_init(node_t* node, size_t size, node_t* prev, node_t* next)
+{
+  node->size = size;
+  node->prev = prev;
+  node->next = next;
+  node_update_neighbours(node);
 }
 
 void node_destroy(node_t* node)
@@ -99,7 +105,7 @@ node_t* node_merge_forward(node_t* node)
 node_t* node_find_fitting(node_t* node, size_t size)
 {
   for(;node != NULL; node = node->next) {
-    if(node->size > size) {
+    if(node->size >= size) {
       return node;
     }
   }
@@ -124,7 +130,7 @@ node_t* node_find_owner(node_t* node, void* ptr)
 
 void node_decrease_size(node_t* node, size_t size)
 {
-  assert(node->size > size);
+  assert(node->size >= size);
 
   node->size = node->size - size;
 
@@ -167,6 +173,13 @@ void page_init(page_t* page, size_t size)
   node_init(PAGE_FREE_NODES(page), PAGE_FREE_SIZE(size), NULL, NULL);
 }
 
+char page_empty(page_t* page)
+{
+  size_t s1 = PAGE_FREE_SIZE(page->size);
+  size_t s2 = PAGE_FREE_NODES(page)->size;
+  return s1 == s2;
+}
+
 void* page_set_size(page_t* page __attribute__((unused)), void* ptr, size_t size)
 {
   *(size_t*)ptr = size;
@@ -180,7 +193,7 @@ size_t page_get_size(page_t* page __attribute__((unused)), void* ptr)
 
 void page_node_create(page_t* page, node_t* node, size_t size, node_t* prev, node_t* next)
 {
-  INFO("Creating new node");
+//  INFO("Creating new node");
   assert(node >= PAGE_FREE_NODES(page));
   char* page_end = (char*)page + page->size;
   char* node_end = (char*)node + size;
@@ -193,30 +206,43 @@ void page_node_create(page_t* page, node_t* node, size_t size, node_t* prev, nod
 
 void page_update_free_node(page_t* page, node_t* node)
 {
-  if(node != NULL && node->prev == NULL) {
-    page->free_node = node;
+  assert(node != NULL);
+  node_t* i;
+  for (i = node; i->prev != NULL ; i = i->prev) {
   }
+  page->free_node = i;
+  node_update_neighbours(node);
 }
 
 void page_node_destroy(page_t* page, node_t* node)
 {
   node_destroy(node);
-  page_update_free_node(page, node->next);
+  if(node -> next != NULL) {
+    page_update_free_node(page, node->next);
+  } else {
+    if(node->prev != NULL) {
+      page_update_free_node(page, node->prev);
+    } else {
+      page->free_node = NULL;
+    }
+  }
 }
 
 void* page_find_space(page_t* page, size_t size)
 {
   node_t* free_node = node_find_fitting(PAGE_FREE_NODES(page), ALLOC_SIZE(size));
   if(free_node == NULL) {
-    INFO("No fitting node found");
+//    INFO("No fitting node found");
     return NULL;
   }
   node_decrease_size(free_node, ALLOC_SIZE(size));
   void* mem = (void*)free_node;
-  free_node = node_move(free_node, ALLOC_SIZE(size));
-  page_update_free_node(page, free_node);
-  if(free_node -> size <= 1) {
+  if(free_node -> size <= sizeof(node_t)-1) {
+    //INFO("destroying node");
     page_node_destroy(page, free_node);
+  } else {
+    free_node = node_move(free_node, ALLOC_SIZE(size));
+    page_update_free_node(page, free_node);
   }
   return page_set_size(page, mem, size);
 }
@@ -232,13 +258,15 @@ void page_node_merge_forward(page_t* page, node_t* node)
 
 page_t* page_free(page_t* page, void* ptr)
 {
-  ptr = PAGE_REAL_PTR(ptr);;
+  ptr = PAGE_REAL_PTR(ptr);
   size_t size = page_get_size(page, ptr);
   if(size == 0) {
     return NULL;
   }
-  node_t* prev_free_node = node_find_owner(PAGE_FREE_NODES(page), ptr);
-  node_t* next_free_node;
+  node_t* prev_free_node = NULL, *next_free_node;
+  if(PAGE_FREE_NODES(page) != NULL) {
+    prev_free_node = node_find_owner(PAGE_FREE_NODES(page), ptr);
+  }
   node_t* this_node, *prev_node;
   this_node = (node_t*) ptr; 
   if(prev_free_node == NULL) {
@@ -249,9 +277,9 @@ page_t* page_free(page_t* page, void* ptr)
     next_free_node = prev_free_node->next;
     prev_node = prev_free_node;
   }
-  page_node_create(page, this_node, size, prev_free_node, next_free_node);
+  page_node_create(page, this_node, ALLOC_SIZE(size), prev_free_node, next_free_node);
   page_node_merge_forward(page, prev_node);
-  if(PAGE_FREE_NODES(page)->next == NULL) {
+  if(page_empty(page)) {
     return page;
   }
   return NULL;
@@ -260,13 +288,16 @@ page_t* page_free(page_t* page, void* ptr)
 typedef struct pagecontrol {
   char flags;
   page_t* pages;
+  pthread_mutex_t lock;
 
 } pcontrol_t;
 
 #define PCON_INITFLAG (0x1)
 
 #define PCON_IS_INIT(X) ( ((X)->flags & PCON_INITFLAG) == 1 )
-#define PCON_CHECKINIT(X) { if( ! PCON_IS_INIT(X) ) { INFO("Initializing pcon.."); pcontrol_init(X); } }
+#define PCON_CHECKINIT(X) { if( ! PCON_IS_INIT(X) ) { /*INFO("Initializing pcon.."); */pcontrol_init(X); } }
+#define PCON_LOCK(P) { if(pthread_mutex_lock(&P->lock) != 0) { fatal("mutex lock"); } }
+#define PCON_ULOCK(P) { if(pthread_mutex_unlock(&P->lock) != 0) { fatal("mutex unlock"); } }
 
 #define PAGE_SIZE 4096
 
@@ -281,7 +312,7 @@ void pcon_debug(pcontrol_t* pcon)
   for (page_t* p = pcon->pages; p!=NULL; p = PAGE_NEXT(p), i++) {
     char buf[32];
     sprintf(buf, "---\npagenr : %lu\n", i);
-    INFO(buf);
+    //INFO(buf);
     page_debug(p);
   }
 }
@@ -297,6 +328,9 @@ void pcontrol_init(pcontrol_t* pcon)
   if(pcon_allocate_new_page(pcon, 1) == NULL)
   {
     fatal("Cannot allocate first page");
+  }
+  if(pthread_mutex_init(&pcon->lock,NULL) != 0) {
+    fatal("mutex init");
   }
  // atexit(&pcon_cleanup);
 }
@@ -333,7 +367,7 @@ size_t pcon_get_size(pcontrol_t* pcon, void* ptr)
 
 page_t* pcon_allocate_new_page(pcontrol_t* pcon, size_t size)
 {
-  INFO("Allocating new page");
+  //INFO("Allocating new page");
   char buf[256];
   int flags = MAP_PRIVATE | MAP_ANONYMOUS;
   size_t psize = PAGE_SIZE;
@@ -342,10 +376,10 @@ page_t* pcon_allocate_new_page(pcontrol_t* pcon, size_t size)
     psize = psize + PAGE_SIZE;
   }
   sprintf(buf, " size: %lu", psize);
-  INFO(buf);
+  //INFO(buf);
   page_t* p = (page_t*) mmap(NULL, psize, PROT_READ | PROT_WRITE | PROT_EXEC, flags, -1, 0);
   if(p == NULL) {
-    INFO("mmap failed");
+    //INFO("mmap failed");
     return NULL;
   }
   PAGE_SET_NEXT(p,pcon->pages);
@@ -358,7 +392,7 @@ void pcon_dealloc_page(pcontrol_t* pcon, page_t* page)
 {
   if(page == pcon->pages && PAGE_NEXT(page) == NULL)
     return; // don't deallocate last page
-  INFO("deallocating page");
+  //INFO("deallocating page");
   page_t* next = PAGE_NEXT(page);
   page_t* p;
   for (p = pcon->pages; p != NULL; p = PAGE_NEXT(p)) {
@@ -387,17 +421,21 @@ void* pcon_malloc(pcontrol_t* pcon, size_t size)
   if(size % ALIGN) {
     size = size + ALIGN - size % ALIGN;
   }
+  PCON_LOCK(pcon);
   void* mem = pcon_find_space(pcon, size);
   if(mem == NULL) {
     page_t* page_ptr = pcon_allocate_new_page(pcon, size);
     if(page_ptr  == NULL) {
-      INFO("failed to allocate new page");
+      //INFO("failed to allocate new page");
+      PCON_ULOCK(pcon);
+      errno = ENOMEM;
       return NULL;
     }
     mem = page_find_space(page_ptr, size);
   }
   if(mem == NULL)
-    INFO("malloc failed");
+    //INFO("malloc failed");
+  PCON_ULOCK(pcon);
   return mem;
 }
 
@@ -406,20 +444,27 @@ void pcon_free(pcontrol_t* pcon, void* ptr)
   if(ptr == NULL) {
     return;
   }
+  PCON_LOCK(pcon);
   page_t* page = pcon_get_owner(pcon, ptr);
   if(page == NULL) {
+    PCON_ULOCK(pcon);
     return;
   }
   if(page_free(page, ptr) == page)
   {
     pcon_dealloc_page(pcon, page);
   }
+  PCON_ULOCK(pcon);
 }
+
 void* pcon_realloc(pcontrol_t* pcon, void* ptr, size_t size)
 {
   void* mem = pcon_malloc(pcon, size);
   if(mem == NULL) {
     return NULL;
+  }
+  if(ptr == NULL) {
+    return mem;
   }
   size_t oldsize = pcon_get_size(pcon, ptr);
   if (oldsize == 0) {
@@ -455,7 +500,7 @@ void* pcon_calloc(pcontrol_t* pcon, size_t count, size_t size)
 
  void pcon_cleanup()
 {
-  INFO("Cleaning up..\n");
+  //INFO("Cleaning up..\n");
   for (page_t* p = _pageinfo.pages, *t = p; p != NULL; p = t ) {
     t = PAGE_NEXT(p);
     munmap(p, p->size);
@@ -467,24 +512,30 @@ void* pcon_calloc(pcontrol_t* pcon, size_t count, size_t size)
   IF_MALLOC_ACTIVE {
     PCON_CHECKINIT(& _pageinfo);
     char buf[256];
-    sprintf(buf, " malloc size: %lu", size);
+    sprintf(buf, " a %lu", size);
     INFO(buf);
-    return pcon_malloc(&_pageinfo, size);
+    char* mem = pcon_malloc(&_pageinfo, size);
+    sprintf(buf, "p %p", mem);
+    INFO(buf);
+    return mem;
   ELSE_GLIBC
     return __libc_malloc(size);
   }
 }
 
+
  void* calloc(size_t count, size_t size)
 {
   IF_MALLOC_ACTIVE {
     PCON_CHECKINIT(& _pageinfo);
+    char buf[256];
+    sprintf(buf, " c %lu %lu", count, size);
+    INFO(buf);
     return pcon_calloc(&_pageinfo, count, size);
   ELSE_GLIBC
     return __libc_calloc(count,size);
   }
 }
-
 
  void* realloc(void* ptr, size_t size)
 {
@@ -506,7 +557,7 @@ void* pcon_calloc(pcontrol_t* pcon, size_t count, size_t size)
     }
     char buf[256];
     sprintf(buf, " free: %p",ptr);
-    INFO(buf);
+    //INFO(buf);
     pcon_free(& _pageinfo, ptr);
   ELSE_GLIBC
     __libc_free(ptr);
