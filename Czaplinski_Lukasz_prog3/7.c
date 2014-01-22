@@ -352,39 +352,46 @@ void killpid()
 
 int main(int argc, const char *argv[])
 {
-  char name[NAME_MAX+1];
-  strcpy(name, "7_long_dummy_directory"); 
-  if(argc > 1) {
-    strncpy(name, argv[1], NAME_MAX);
-    name[NAME_MAX] = '\0';
-  }
-  if(mkdir(name , MODE1) == -1) {
-    if(errno == EEXIST) {
-      printf("Using existing dir: %s\n", name);
+  if(argc < 2 || strcmp(argv[1], "-r") == 0) {
+    char name[NAME_MAX+1];
+    strcpy(name, "7_long_dummy_directory"); 
+    if(argc > 3) {
+      strncpy(name, argv[2], NAME_MAX);
+      name[NAME_MAX] = '\0';
+    }
+    if(mkdir(name , MODE1) == -1) {
+      if(errno == EEXIST) {
+        printf("Using existing dir: %s\n", name);
+      } else {
+        fatal("mkdir");
+      }
     } else {
-      fatal("mkdir");
+      printf("Using newly created dir: %s\n", name);
+    }
+    int sib = -1;
+    if((sib = fork()) == -1) {
+      fatal("fork");
+    }  
+    switch(sib) {
+      case 0:
+        info("Child..");
+        set_siginth();
+        watch(name);
+        break;
+      default:
+        info("Parent..");
+        pid = sib;
+        set_siginth();
+        atexit(killpid);
+        sleep(1);
+        hackNCreate(name);
+        break;
     }
   } else {
-    printf("Using newly created dir: %s\n", name);
-  }
-  int sib = -1;
-  if((sib = fork()) == -1) {
-    fatal("fork");
-  }  
-  switch(sib) {
-    case 0:
-      info("Child..");
-      set_siginth();
-      watch(name);
-      break;
-    default:
-      info("Parent..");
-      pid = sib;
-      set_siginth();
-      atexit(killpid);
-      sleep(1);
-      hackNCreate(name);
-      break;
+    info("Just watching..");
+    info(argv[1]);
+    set_siginth();
+    watch(argv[1]);
   }
   return 0;
 }
