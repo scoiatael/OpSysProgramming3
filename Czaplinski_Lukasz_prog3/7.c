@@ -101,6 +101,7 @@ void dirnotify_watch()
   while( 1 > 0) {
     read(notify_fd, buf, sizeof(buf));
     dirnotify_process((struct inotify_event*)buf);
+    fflush(stdout);
   }
 }
 
@@ -187,19 +188,30 @@ void forge_new_file(char* name, const char* prefix, int* fd)
   
 }
 
+#define SEC_DIR "totally_not_an_old_dir"
+int ind = -1;
+char fullname[2*NAME_MAX + 2];
+
+void hackNCreate_cleanup()
+{
+  if(ind != -1) {
+    close_descriptor(&ind);
+  }
+  unlink(fullname);
+  unlink(SEC_DIR);
+}
+
 void hackNCreate(const char* name)
 {
   struct timeb t;
   ftime(&t);
   srand( t.time + t.millitm );
 
-  char prefix[NAME_MAX + 2], fullname[2*NAME_MAX + 2];
+  char prefix[NAME_MAX + 2];
   strcpy(prefix, name);
   strcat(prefix, "/");
   
-  int index = -1;
-
-  forge_new_file(fullname, prefix, &index);
+  forge_new_file(fullname, prefix, &ind);
 
   struct utimbuf ut;
   memset(&ut, 0, sizeof(ut));
@@ -225,12 +237,13 @@ void hackNCreate(const char* name)
         if(utime(fullname, &ut) != 0) {
           fatal("utime");
         }*/
-        close_descriptor(&index);
-        open_read(fullname, &index);
+        close_descriptor(&ind);
+        open_read(fullname, &ind);
         char b[20];
-        if(read(index, (void*)b, sizeof(b)) < 0) {
+        if(read(ind, (void*)b, sizeof(b)) < 0) {
           fatal("read");
         }
+        close_descriptor(&ind);
         break;
       case 1:
         printf("-------------testing attrib..\n");
@@ -260,24 +273,24 @@ void hackNCreate(const char* name)
         */
       case 4:
         printf("-------------testing close_write..\n");
-        close_descriptor(&index);
-        open_write(fullname, &index);
-        write(index, "wriiiiiiting...", 6);
-        close_descriptor(&index);
+        close_descriptor(&ind);
+        open_write(fullname, &ind);
+        write(ind, "wriiiiiiting...", 6);
+        close_descriptor(&ind);
         break;
       case 5:
         printf("-------------testing create..\n");
         if(unlink(fullname) != 0) {
           fatal("unlink");
         }
-        forge_new_file(fullname, prefix, &index);
+        forge_new_file(fullname, prefix, &ind);
         break;
       case 7:
         printf("-------------testing delete..\n");
         if(unlink(fullname) != 0) {
           fatal("unlink");
         }
-        forge_new_file(fullname, prefix, &index);
+        forge_new_file(fullname, prefix, &ind);
         break;
       case 10:
         printf("-------------testing move_to..\n");
@@ -285,7 +298,7 @@ void hackNCreate(const char* name)
         if(unlink(fullname) != 0) {
           fatal("unlink");
         }
-        close_descriptor(&index);
+        close_descriptor(&ind);
         if(rename(TEMP_NAME, fullname) != 0) {
           fatal("rename");
         }
@@ -298,14 +311,14 @@ void hackNCreate(const char* name)
         if(unlink(TEMP_NAME) != 0) {
           fatal("unlink");
         }
-        forge_new_file(fullname, prefix, &index);
+        forge_new_file(fullname, prefix, &ind);
         break;
       case 8:
         printf("-------------testing delete_self..\n");
         if(unlink(fullname) != 0) {
           fatal("unlink");
         }
-        close_descriptor(&index);
+        close_descriptor(&ind);
         if(rmdir(name) != 0) {
           fatal("rmdir");
         } else {
@@ -315,8 +328,9 @@ void hackNCreate(const char* name)
         break;
       case 9:
         printf("-------------testing move_self..\n");
-        close_descriptor(&index);
-        if(rename(name, "totally_not_old_directory") != 0) {
+        close_descriptor(&ind);
+        unlink(fullname);
+        if(rename(name, SEC_DIR) != 0) {
           fatal("rmdir");
         } else {
           fprintf(stderr, "Renamed old dir, exiting..\n");
@@ -324,7 +338,7 @@ void hackNCreate(const char* name)
         }
         break;
     }
-    sleep(1);
+    sleep(2);
   }
 }
 
