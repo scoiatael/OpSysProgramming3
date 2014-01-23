@@ -38,10 +38,9 @@ void info(const char* msg __attribute__((unused)) )
 #endif //DEBUG
 }
 
-void fatal(const char* msg __attribute__((unused)) ) 
+void fatal(const char* msg ) 
 {
-  info(msg);
-  perror(" ");
+  perror(msg);
   exit(EXIT_FAILURE);
 }
 #endif // NO_COM_DEF

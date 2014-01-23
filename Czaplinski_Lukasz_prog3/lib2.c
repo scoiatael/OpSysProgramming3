@@ -378,7 +378,7 @@ page_t* pcon_allocate_new_page(pcontrol_t* pcon, size_t size)
   sprintf(buf, " size: %lu", psize);
   //INFO(buf);
   page_t* p = (page_t*) mmap(NULL, psize, PROT_READ | PROT_WRITE | PROT_EXEC, flags, -1, 0);
-  if(p == NULL) {
+  if(p == MAP_FAILED) {
     //INFO("mmap failed");
     return NULL;
   }
