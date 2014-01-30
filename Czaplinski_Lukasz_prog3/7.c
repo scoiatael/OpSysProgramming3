@@ -99,7 +99,8 @@ void dirnotify_watch()
 {
   char buf[sizeof(struct inotify_event) + NAME_MAX + 1];
   while( 1 > 0) {
-    read(notify_fd, buf, sizeof(buf));
+    if(read(notify_fd, buf, sizeof(buf)) == -1)
+      fatal("read");
     dirnotify_process((struct inotify_event*)buf);
     fflush(stdout);
   }

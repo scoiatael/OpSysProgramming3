@@ -1,11 +1,6 @@
-#define DEBUG
 #include "common.h"
 #include <malloc.h>
 #include <pthread.h>
-
-static void my_init();
-
-void (*__MALLOC_HOOK_VOLATILE __malloc_initialize_hook)(void) = my_init;
 
 extern void* __libc_malloc(size_t size);
 extern void* __libc_calloc(size_t num, size_t size);
@@ -191,7 +186,7 @@ size_t page_get_size(page_t* page __attribute__((unused)), void* ptr)
   return *(size_t*)ptr;
 }
 
-void page_node_create(page_t* page, node_t* node, size_t size, node_t* prev, node_t* next)
+void page_node_create(page_t* page __attribute__((unused)), node_t* node, size_t size, node_t* prev, node_t* next)
 {
 //  INFO("Creating new node");
   assert(node >= PAGE_FREE_NODES(page));
@@ -200,7 +195,6 @@ void page_node_create(page_t* page, node_t* node, size_t size, node_t* prev, nod
   assert(node_end <= page_end); // allocating on this page
   assert((next == NULL || node_end <= (char*)next));
   assert((prev == NULL || (char*)prev + prev->size <= (char*)node)); //node is valid location
-
   node_init(node, size, prev, next);
 }
 
@@ -239,6 +233,7 @@ void* page_find_space(page_t* page, size_t size)
   void* mem = (void*)free_node;
   if(free_node -> size <= sizeof(node_t)-1) {
     //INFO("destroying node");
+    size = size + free_node -> size;
     page_node_destroy(page, free_node);
   } else {
     free_node = node_move(free_node, ALLOC_SIZE(size));
@@ -292,12 +287,23 @@ typedef struct pagecontrol {
 
 } pcontrol_t;
 
+static pthread_mutex_t _pagecon = PTHREAD_MUTEX_INITIALIZER;
+
 #define PCON_INITFLAG (0x1)
 
 #define PCON_IS_INIT(X) ( ((X)->flags & PCON_INITFLAG) == 1 )
-#define PCON_CHECKINIT(X) { if( ! PCON_IS_INIT(X) ) { /*INFO("Initializing pcon.."); */pcontrol_init(X); } }
-#define PCON_LOCK(P) { if(pthread_mutex_lock(&P->lock) != 0) { fatal("mutex lock"); } }
-#define PCON_ULOCK(P) { if(pthread_mutex_unlock(&P->lock) != 0) { fatal("mutex unlock"); } }
+#define PCON_CHECKINIT(X) { \
+  if(pthread_mutex_lock(&_pagecon) == -1) { INFO("pagecon lck"); }\
+  if( ! PCON_IS_INIT(X) ) { INFO("Initializing pcon.."); \
+    pcontrol_init(X); } \
+  if(pthread_mutex_unlock(&_pagecon) == -1) { INFO("pagecon lck"); } }
+
+#define PCON_LOCK(P) { \
+  if(pthread_mutex_lock(&P->lock) != 0) { fatal("mutex lock"); } \
+  INFO("lck"); }
+
+#define PCON_ULOCK(P) { INFO("ulck"); \
+  if(pthread_mutex_unlock(&P->lock) != 0) { fatal("mutex unlock"); } }
 
 #define PAGE_SIZE 4096
 

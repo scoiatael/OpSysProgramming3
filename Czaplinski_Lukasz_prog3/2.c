@@ -5,6 +5,9 @@
 
 #define MAX_ALLOC (2 << 5)
 
+#define TESTSIZE 12
+#define TALLOCSIZE 16
+
 void sigint_handler(int sig)
 {
   char buf[256];
@@ -120,13 +123,13 @@ int main(int argc, const char *argv[])
     struct timeb t;
     ftime(&t);
     srand( t.time + t.millitm );
-    int r = rand() % (2 << 16);
+    int r = rand() % (2 << TESTSIZE);
     int ind = 0;
     for (int i = 0; i < r; i++) {
       char op = rand() % 2;
       switch(op) {
         case 0:
-          fprintf(f, "a %d\n", rand() % ( 2 << 16 ));
+          fprintf(f, "a %d\n", rand() % ( 2 << TALLOCSIZE ));
           ind++;
           break;
         case 1:
