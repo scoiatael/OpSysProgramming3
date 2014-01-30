@@ -8,20 +8,19 @@ char* Dots;
 
 void dots_init(int N)
 {
-  DotSize = N*(N+1) / 2 + N - 1;
-  Dots = malloc( DotSize + 1);
-  memset(Dots, '*', DotSize);
-  for (int i = 2, accum = 1; i <= N; i++, accum = accum + i ) {
-    Dots[accum] = '\n';
-  }
-  Dots[DotSize] = '\0';
+ DotSize = N*sizeof(char);
+ Dots = malloc(DotSize); 
+ if(Dots == NULL)
+   fatal("malloc");
+ memset(Dots, '*', DotSize);
 }
 
-void print_triangle(unsigned int L, void (*init)(void), void(*print)(const char* string, int length))
+void print_triangle(unsigned int N, unsigned int L, void (*init)(void), void(*print)(const char* string, int length))
 {
   init();
-  for (unsigned int i = 0; i < DotSize - DotSize/L + 1; i = i + DotSize/L) {
-    print(Dots + i, DotSize/L);
+  for (unsigned int i = 0; i < L; i++) {
+    print(Dots, N - i);
+    print("\n", 1);
   }
   print(Dots + DotSize - ( DotSize % L ) - 1, DotSize % L);
 }
@@ -85,19 +84,19 @@ int main(int argc, char * const argv[])
     }
   } 
   dots_init(N);
-//  printf(" N: %d L: %d t:%d\n", N,L,def);
+  fprintf(stderr, " N: %d L: %d t:%d\n", N,L,def);
   switch(def) {
     case 0:
-      print_triangle(L, null_init, write_pr);
+      print_triangle(N, L, null_init, write_pr);
       break;
     case 1:
-      print_triangle(L, null_init, writev_pr);
+      print_triangle(N, L, null_init, writev_pr);
       break;
     case 2:
-      print_triangle(L, null_init, printf_pr);
+      print_triangle(N, L, null_init, printf_pr);
       break;
     case 3:
-      print_triangle(L, printf_init, printf_pr);
+      print_triangle(N, L, printf_init, printf_pr);
       break;
   }
   return 0;
