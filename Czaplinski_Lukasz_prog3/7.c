@@ -97,11 +97,19 @@ void dirnotify_process(const struct inotify_event* event)
 
 void dirnotify_watch()
 {
-  char buf[sizeof(struct inotify_event) + NAME_MAX + 1];
+  int maxsize = sizeof(struct inotify_event) + NAME_MAX + 1;
+  char buf[maxsize];
+  int size;
   while( 1 > 0) {
-    if(read(notify_fd, buf, sizeof(buf)) == -1)
+    if((size = read(notify_fd, buf, maxsize)) == -1)
       fatal("read");
-    dirnotify_process((struct inotify_event*)buf);
+    for(int i = 0; i < size; i = i + sizeof(struct inotify_event)){ 
+      struct inotify_event* this = (struct inotify_event*)(buf + i);
+      dirnotify_process(this);
+      i = i + this -> len;
+      info("next..");
+    }
+    info("--");
     fflush(stdout);
   }
 }
